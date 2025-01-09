@@ -84,8 +84,18 @@ export async function onRequestPost(context) {
         );
     } catch (error) {
         console.error('Upload error:', error);
+        let errorMessage = {
+            error: error.message,
+            details: error.response || 'No additional details'
+        };
+        
+        // 如果是 Telegram API 的错误响应
+        if (typeof responseData !== 'undefined') {
+            errorMessage.telegramResponse = responseData;
+        }
+
         return new Response(
-            JSON.stringify({ error: error.message }),
+            JSON.stringify(errorMessage),
             {
                 status: 500,
                 headers: { 'Content-Type': 'application/json' }
@@ -95,17 +105,24 @@ export async function onRequestPost(context) {
 }
 
 function getFileId(response) {
-    if (!response.ok || !response.result) return null;
+    console.log('Response from Telegram:', JSON.stringify(response, null, 2));
+    
+    if (!response.ok) {
+        console.error('Response not OK');
+        return null;
+    }
+    
+    if (!response.result) {
+        console.error('No result in response');
+        return null;
+    }
 
     const result = response.result;
-    // if (result.photo) {
-    //     return result.photo.reduce((prev, current) =>
-    //         (prev.file_size > current.file_size) ? prev : current
-    //     ).file_id;
-    // }
-    if (result.document) return result.document.file_id;
-    // if (result.video) return result.video.file_id;
-    // if (result.audio) return result.audio.file_id;
-
+    if (result.document) {
+        console.log('Document file_id:', result.document.file_id);
+        return result.document.file_id;
+    }
+    
+    console.error('No supported file type found in response');
     return null;
 }
