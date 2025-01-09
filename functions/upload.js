@@ -4,47 +4,65 @@ export async function onRequestPost(context) {
     const { request, env } = context;
 
     try {
-
         const clonedRequest = request.clone();
         const formData = await clonedRequest.formData();
 
         await errorHandling(context);
         telemetryData(context);
 
-        const uploadFile = formData.get('file');
-        if (!uploadFile) {
-            throw new Error('No file uploaded');
+        // 获取所有上传的文件
+        const files = formData.getAll('file');
+        if (!files || files.length === 0) {
+            throw new Error('No files uploaded');
         }
 
+        // 并行处理所有文件上传
+        const uploadPromises = files.map(file => uploadFileToTelegram(file, env));
+        const results = await Promise.all(uploadPromises);
+
+        // 过滤掉失败的上传
+        const successfulUploads = results.filter(result => result !== null);
+
+        if (successfulUploads.length === 0) {
+            throw new Error('All file uploads failed');
+        }
+
+        return new Response(
+            JSON.stringify(successfulUploads),
+            {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            }
+        );
+    } catch (error) {
+        console.error('Upload error:', error);
+        return new Response(
+            JSON.stringify({ error: error.message }),
+            {
+                status: 500,
+                headers: { 'Content-Type': 'application/json' }
+            }
+        );
+    }
+}
+
+async function uploadFileToTelegram(uploadFile, env) {
+    try {
         const fileName = uploadFile.name;
         const fileExtension = fileName.split('.').pop().toLowerCase();
 
         const telegramFormData = new FormData();
         telegramFormData.append("chat_id", env.TG_Chat_ID);
-
-        // 根据文件类型选择合适的上传方式
-        let apiEndpoint;
-        // if (uploadFile.type.startsWith('image/')) {
-        //     telegramFormData.append("photo", uploadFile);
-        //     apiEndpoint = 'sendPhoto';
-        // } else if (uploadFile.type.startsWith('audio/')) {
-        //     telegramFormData.append("audio", uploadFile);
-        //     apiEndpoint = 'sendAudio';
-        // } else {
         telegramFormData.append("document", uploadFile);
-        apiEndpoint = 'sendDocument';
-        // }
+        const apiEndpoint = 'sendDocument';
 
         const apiUrl = `https://api.telegram.org/bot${env.TG_Bot_Token}/${apiEndpoint}`;
         console.log('Sending request to:', apiUrl);
 
-        const response = await fetch(
-            apiUrl,
-            {
-                method: "POST",
-                body: telegramFormData
-            }
-        );
+        const response = await fetch(apiUrl, {
+            method: "POST",
+            body: telegramFormData
+        });
 
         console.log('Response status:', response.status);
 
@@ -52,13 +70,14 @@ export async function onRequestPost(context) {
 
         if (!response.ok) {
             console.error('Error response from Telegram API:', responseData);
-            throw new Error(responseData.description || 'Upload to Telegram failed');
+            return null;
         }
 
         const fileId = getFileId(responseData);
 
         if (!fileId) {
-            throw new Error('Failed to get file ID');
+            console.error('Failed to get file ID');
+            return null;
         }
 
         // 将文件信息保存到 KV 存储
@@ -75,22 +94,10 @@ export async function onRequestPost(context) {
             });
         }
 
-        return new Response(
-            JSON.stringify([{ 'src': `/file/${fileId}.${fileExtension}` }]),
-            {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' }
-            }
-        );
+        return { 'src': `/file/${fileId}.${fileExtension}` };
     } catch (error) {
-        console.error('Upload error:', error);
-        return new Response(
-            JSON.stringify({ error: error.message }),
-            {
-                status: 500,
-                headers: { 'Content-Type': 'application/json' }
-            }
-        );
+        console.error('Error uploading file:', error);
+        return null;
     }
 }
 
