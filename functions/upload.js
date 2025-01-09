@@ -10,7 +10,7 @@ export async function onRequestPost(context) {
 
         await errorHandling(context);
         telemetryData(context);
-        
+
         const uploadFile = formData.get('file');
         if (!uploadFile) {
             throw new Error('No file uploaded');
@@ -24,13 +24,16 @@ export async function onRequestPost(context) {
 
         // 根据文件类型选择合适的上传方式
         let apiEndpoint;
-        if (uploadFile.type.startsWith('image/')) {
-            telegramFormData.append("photo", uploadFile);
-            apiEndpoint = 'sendPhoto';
-        } else {
-            telegramFormData.append("document", uploadFile);
-            apiEndpoint = 'sendDocument';
-        }
+        // if (uploadFile.type.startsWith('image/')) {
+        //     telegramFormData.append("photo", uploadFile);
+        //     apiEndpoint = 'sendPhoto';
+        // } else if (uploadFile.type.startsWith('audio/')) {
+        //     telegramFormData.append("audio", uploadFile);
+        //     apiEndpoint = 'sendAudio';
+        // } else {
+        telegramFormData.append("document", uploadFile);
+        apiEndpoint = 'sendDocument';
+        // }
 
         const apiUrl = `https://api.telegram.org/bot${env.TG_Bot_Token}/${apiEndpoint}`;
         console.log('Sending request to:', apiUrl);
@@ -58,6 +61,20 @@ export async function onRequestPost(context) {
             throw new Error('Failed to get file ID');
         }
 
+        // 将文件信息保存到 KV 存储
+        if (env.img_url) {
+            await env.img_url.put(`${fileId}.${fileExtension}`, "", {
+                metadata: {
+                    TimeStamp: Date.now(),
+                    ListType: "None",
+                    Label: "None",
+                    liked: false,
+                    fileName: fileName,
+                    fileSize: uploadFile.size,
+                }
+            });
+        }
+
         return new Response(
             JSON.stringify([{ 'src': `/file/${fileId}.${fileExtension}` }]),
             {
@@ -81,13 +98,14 @@ function getFileId(response) {
     if (!response.ok || !response.result) return null;
 
     const result = response.result;
-    if (result.photo) {
-        return result.photo.reduce((prev, current) =>
-            (prev.file_size > current.file_size) ? prev : current
-        ).file_id;
-    }
+    // if (result.photo) {
+    //     return result.photo.reduce((prev, current) =>
+    //         (prev.file_size > current.file_size) ? prev : current
+    //     ).file_id;
+    // }
     if (result.document) return result.document.file_id;
-    if (result.video) return result.video.file_id;
+    // if (result.video) return result.video.file_id;
+    // if (result.audio) return result.audio.file_id;
 
     return null;
 }
