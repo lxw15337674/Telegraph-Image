@@ -21,7 +21,6 @@ export async function onRequestPost(context) {
 
         const telegramFormData = new FormData();
         telegramFormData.append("chat_id", env.TG_Chat_ID);
-
         // 根据文件类型选择合适的上传方式
         let apiEndpoint;
         // if (uploadFile.type.startsWith('image/')) {
@@ -47,8 +46,23 @@ export async function onRequestPost(context) {
         );
 
         console.log('Response status:', response.status);
-
-        const responseData = await response.json();
+        debugger;
+        // 检查Content-Type
+        const contentType = response.headers.get('content-type');
+        let responseData;
+        
+        if (contentType && contentType.includes('application/json')) {
+            responseData = await response.json();
+        } else {
+            // 如果不是JSON，先转换为文本
+            const textData = await response.text();
+            try {
+                responseData = JSON.parse(textData);
+            } catch (e) {
+                console.error('Failed to parse response:', textData);
+                throw new Error('Invalid response format from Telegram API');
+            }
+        }
 
         if (!response.ok) {
             console.error('Error response from Telegram API:', responseData);
@@ -121,6 +135,10 @@ function getFileId(response) {
     if (result.document) {
         console.log('Document file_id:', result.document.file_id);
         return result.document.file_id;
+    }
+    if (result.video){
+        console.log('Movie file_id:', result.video.file_id);
+        return result.video.file_id
     }
     
     console.error('No supported file type found in response');
