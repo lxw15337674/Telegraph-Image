@@ -22,15 +22,15 @@ export async function onRequestPost(context) {
             throw new Error('No files uploaded');
         }
 
-        // 并发处理所有文件上传
-        const uploadPromises = files.map(file => processFileUpload(file, env));
+        // 并发处理所有文件上传，传入 request 对象
+        const uploadPromises = files.map(file => processFileUpload(file, env, request));
         const results = await Promise.all(uploadPromises);
 
         // 过滤掉上传失败的结果
         const successfulUploads = results.filter(result => result !== null);
 
         return new Response(
-            JSON.stringify(successfulUploads.map(result => ({ 'src': result.src }))),
+            JSON.stringify(successfulUploads.map(result => ({ 'src': result.src, 'thumbnail': result.thumbnail }))),
             {
                 status: 200,
                 headers: { 'Content-Type': 'application/json' }
@@ -52,7 +52,7 @@ export async function onRequestPost(context) {
     }
 }
 
-async function processFileUpload(uploadFile, env) {
+async function processFileUpload(uploadFile, env, request) {
     try {
         const fileName = uploadFile.name;
         const fileExtension = fileName.split('.').pop().toLowerCase();
@@ -74,15 +74,15 @@ async function processFileUpload(uploadFile, env) {
             return null;
         }
 
-        const fileId = getFileId(responseData);
-        if (!fileId) {
-            console.error('Failed to get file ID for:', fileName);
+        const fileInfo = getFileInfo(responseData);
+        if (!fileInfo) {
+            console.error('Failed to get file info for:', fileName);
             return null;
         }
 
         // 将文件信息保存到 KV 存储
         if (env.img_url) {
-            await env.img_url.put(`${fileId}.${fileExtension}`, "", {
+            await env.img_url.put(`${fileInfo.fileId}.${fileExtension}`, "", {
                 metadata: {
                     TimeStamp: Date.now(),
                     ListType: "None",
@@ -94,9 +94,17 @@ async function processFileUpload(uploadFile, env) {
             });
         }
 
+        const baseUrl = new URL(request.url).origin;
         return {
-            src: `/file/${fileId}.${fileExtension}`,
-            fileName: fileName
+            src: `${baseUrl}/file/${fileInfo.fileId}.${fileExtension}`,
+            fileName: fileName,
+            width: fileInfo.width,
+            height: fileInfo.height,
+            thumbnail: fileInfo.thumbnail ? {
+                src: `${baseUrl}/file/${fileInfo.thumbnail.file_id}.${fileExtension}`,
+                width: fileInfo.thumbnail.width,
+                height: fileInfo.thumbnail.height
+            } : null
         };
 
     } catch (error) {
@@ -105,17 +113,37 @@ async function processFileUpload(uploadFile, env) {
     }
 }
 
-function getFileId(response) {
+function getFileInfo(response) {
     if (!response.ok || !response.result) {
         return null;
     }
 
     const result = response.result;
     if (result.document) {
-        return result.document.file_id;
+        return {
+            fileId: result.document.file_id,
+            width: result.document.width || null,
+            height: result.document.height || null,
+            thumbnail: result.document.thumbnail ? {
+                file_id: result.document.thumbnail.file_id,
+                file_size: result.document.thumbnail.file_size,
+                width: result.document.thumbnail.width,
+                height: result.document.thumbnail.height
+            } : null
+        };
     }
     if (result.video) {
-        return result.video.file_id;
+        return {
+            fileId: result.video.file_id,
+            width: result.video.width || null,
+            height: result.video.height || null,
+            thumbnail: result.video.thumbnail ? {
+                file_id: result.video.thumbnail.file_id,
+                file_size: result.video.thumbnail.file_size,
+                width: result.video.thumbnail.width,
+                height: result.video.thumbnail.height
+            } : null
+        };
     }
 
     return null;
