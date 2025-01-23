@@ -4,75 +4,80 @@ export async function onRequestPost(context) {
     const { request, env } = context;
 
     try {
-
         const clonedRequest = request.clone();
         const formData = await clonedRequest.formData();
 
         await errorHandling(context);
         telemetryData(context);
 
-        const uploadFile = formData.get('file');
-        if (!uploadFile) {
-            throw new Error('No file uploaded');
+        // 获取所有上传的文件
+        const files = [];
+        for (const [key, value] of formData.entries()) {
+            if (key === 'file[]' || key === 'file') {  // 支持单文件和多文件上传
+                files.push(value);
+            }
         }
 
+        if (files.length === 0) {
+            throw new Error('No files uploaded');
+        }
+
+        // 并发处理所有文件上传
+        const uploadPromises = files.map(file => processFileUpload(file, env));
+        const results = await Promise.all(uploadPromises);
+
+        // 过滤掉上传失败的结果
+        const successfulUploads = results.filter(result => result !== null);
+
+        return new Response(
+            JSON.stringify(successfulUploads.map(result => ({ 'src': result.src }))),
+            {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            }
+        );
+
+    } catch (error) {
+        console.error('Upload error:', error);
+        return new Response(
+            JSON.stringify({
+                error: error.message,
+                details: error.response || 'No additional details'
+            }),
+            {
+                status: 500,
+                headers: { 'Content-Type': 'application/json' }
+            }
+        );
+    }
+}
+
+async function processFileUpload(uploadFile, env) {
+    try {
         const fileName = uploadFile.name;
         const fileExtension = fileName.split('.').pop().toLowerCase();
 
         const telegramFormData = new FormData();
         telegramFormData.append("chat_id", env.TG_Chat_ID);
-        // 根据文件类型选择合适的上传方式
-        let apiEndpoint;
-        // if (uploadFile.type.startsWith('image/')) {
-        //     telegramFormData.append("photo", uploadFile);
-        //     apiEndpoint = 'sendPhoto';
-        // } else if (uploadFile.type.startsWith('audio/')) {
-        //     telegramFormData.append("audio", uploadFile);
-        //     apiEndpoint = 'sendAudio';
-        // } else {
         telegramFormData.append("document", uploadFile);
-        apiEndpoint = 'sendDocument';
-        // }
 
-        const apiUrl = `https://api.telegram.org/bot${env.TG_Bot_Token}/${apiEndpoint}`;
-        console.log('Sending request to:', apiUrl);
+        const apiUrl = `https://api.telegram.org/bot${env.TG_Bot_Token}/sendDocument`;
+        const response = await fetch(apiUrl, {
+            method: "POST",
+            body: telegramFormData
+        });
 
-        const response = await fetch(
-            apiUrl,
-            {
-                method: "POST",
-                body: telegramFormData
-            }
-        );
-
-        console.log('Response status:', response.status);
-        debugger;
-        // 检查Content-Type
-        const contentType = response.headers.get('content-type');
-        let responseData;
-        
-        if (contentType && contentType.includes('application/json')) {
-            responseData = await response.json();
-        } else {
-            // 如果不是JSON，先转换为文本
-            const textData = await response.text();
-            try {
-                responseData = JSON.parse(textData);
-            } catch (e) {
-                console.error('Failed to parse response:', textData);
-                throw new Error('Invalid response format from Telegram API');
-            }
-        }
+        const responseData = await response.json();
 
         if (!response.ok) {
-            console.error('Error response from Telegram API:', responseData);
-            throw new Error(responseData.description || 'Upload to Telegram failed');
+            console.error('Error uploading file:', fileName, responseData);
+            return null;
         }
 
         const fileId = getFileId(responseData);
-
         if (!fileId) {
-            throw new Error('Failed to get file ID');
+            console.error('Failed to get file ID for:', fileName);
+            return null;
         }
 
         // 将文件信息保存到 KV 存储
@@ -89,58 +94,29 @@ export async function onRequestPost(context) {
             });
         }
 
-        return new Response(
-            JSON.stringify([{ 'src': `/file/${fileId}.${fileExtension}` }]),
-            {
-                status: 200,
-                headers: { 'Content-Type': 'application/json' }
-            }
-        );
-    } catch (error) {
-        console.error('Upload error:', error);
-        let errorMessage = {
-            error: error.message,
-            details: error.response || 'No additional details'
+        return {
+            src: `/file/${fileId}.${fileExtension}`,
+            fileName: fileName
         };
-        
-        // 如果是 Telegram API 的错误响应
-        if (typeof responseData !== 'undefined') {
-            errorMessage.telegramResponse = responseData;
-        }
 
-        return new Response(
-            JSON.stringify(errorMessage),
-            {
-                status: 500,
-                headers: { 'Content-Type': 'application/json' }
-            }
-        );
+    } catch (error) {
+        console.error('Error processing file:', uploadFile.name, error);
+        return null;
     }
 }
 
 function getFileId(response) {
-    console.log('Response from Telegram:', JSON.stringify(response, null, 2));
-    
-    if (!response.ok) {
-        console.error('Response not OK');
-        return null;
-    }
-    
-    if (!response.result) {
-        console.error('No result in response');
+    if (!response.ok || !response.result) {
         return null;
     }
 
     const result = response.result;
     if (result.document) {
-        console.log('Document file_id:', result.document.file_id);
         return result.document.file_id;
     }
-    if (result.video){
-        console.log('Movie file_id:', result.video.file_id);
-        return result.video.file_id
+    if (result.video) {
+        return result.video.file_id;
     }
-    
-    console.error('No supported file type found in response');
+
     return null;
 }
