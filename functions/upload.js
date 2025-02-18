@@ -73,13 +73,11 @@ async function processFileUpload(uploadFile, env, request) {
             console.error('Error uploading file:', fileName, responseData);
             return null;
         }
-
         const fileInfo = getFileInfo(responseData);
         if (!fileInfo) {
             console.error('Failed to get file info for:', fileName);
             return null;
         }
-
         // 将文件信息保存到 KV 存储
         if (env.img_url) {
             await env.img_url.put(`${fileInfo.fileId}.${fileExtension}`, "", {
@@ -119,6 +117,19 @@ function getFileInfo(response) {
     }
 
     const result = response.result;
+    if (result.sticker){
+        return {
+            fileId: result.sticker.file_id,
+            width: result.sticker.width || null,
+            height: result.sticker.height || null,
+            thumbnail: result.sticker.thumbnail ? {
+                file_id: result.sticker.thumbnail.file_id,
+                file_size: result.sticker.thumbnail.file_size,
+                width: result.sticker.thumbnail.width,
+                height: result.sticker.thumbnail.height
+            } : null
+        }
+    }
     if (result.document) {
         return {
             fileId: result.document.file_id,
