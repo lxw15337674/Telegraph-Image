@@ -1,5 +1,18 @@
 import { errorHandling, telemetryData } from "./utils/middleware";
 
+// 处理 OPTIONS 预检请求
+export async function onRequestOptions(context) {
+    return new Response(null, {
+        status: 200,
+        headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Max-Age': '86400', // 24小时
+        }
+    });
+}
+
 export async function onRequestPost(context) {
     const { request, env } = context;
 
@@ -43,7 +56,12 @@ export async function onRequestPost(context) {
             JSON.stringify(successfulUploads.map(result => ({ 'src': result.src, 'thumbnail': result.thumbnail }))),
             {
                 status: 200,
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                }
             }
         );
 
@@ -56,7 +74,12 @@ export async function onRequestPost(context) {
             }),
             {
                 status: 500,
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                }
             }
         );
     }
